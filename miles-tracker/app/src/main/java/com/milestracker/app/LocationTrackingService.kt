@@ -27,7 +27,9 @@ class LocationTrackingService : Service() {
     private var currentSpeed: Float = 0f
     private var currentLat: Double = 0.0
     private var currentLng: Double = 0.0
-    private var isAutoTracking = false
+    
+    private var isTrackingActive = false
+    private var isManuallyStarted = false
     
     private val binder = LocalBinder()
     
@@ -82,13 +84,15 @@ class LocationTrackingService : Service() {
     }
     
     fun startManualTracking() {
-        if (!isAutoTracking) {
+        isManuallyStarted = true
+        if (!isTrackingActive) {
             startForegroundService()
         }
     }
 
     fun stopManualTracking() {
-        if (isAutoTracking) {
+        isManuallyStarted = false
+        if (isTrackingActive) {
             stopForegroundService()
         }
     }
@@ -102,14 +106,16 @@ class LocationTrackingService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         
-        isAutoTracking = true
+        isTrackingActive = true
         repository.setTrackingActive(true)
     }
     
     private fun stopForegroundService() {
         stopForeground(true)
-        isAutoTracking = false
+        isTrackingActive = false
         repository.setTrackingActive(false)
+        // Reset manual flag when service is stopped for any reason
+        isManuallyStarted = false
     }
     
     private fun buildNotification(): Notification {
@@ -157,21 +163,21 @@ class LocationTrackingService : Service() {
         broadcastLocationUpdate()
         
         // Auto-tracking logic
-        if (speedKmh >= SPEED_THRESHOLD_KMH && !isAutoTracking) {
+        if (speedKmh >= SPEED_THRESHOLD_KMH && !isTrackingActive) {
             startForegroundService()
-        } else if (speedKmh < SPEED_THRESHOLD_KMH && isAutoTracking) {
-            // Add a check to not stop if manually started - this will be handled in MainActivity
+        } else if (speedKmh < SPEED_THRESHOLD_KMH && isTrackingActive && !isManuallyStarted) {
+            stopForegroundService()
         }
         
         // Save data and update notification only when tracking
-        if (isAutoTracking) {
+        if (isTrackingActive) {
             repository.addLocationPoint(currentLat, currentLng, currentSpeed)
             updateNotification()
         }
     }
     
     private fun updateNotification() {
-        if (isAutoTracking) {
+        if (isTrackingActive) {
             val notification = buildNotification()
             notificationManager.notify(NOTIFICATION_ID, notification)
         }
@@ -211,12 +217,12 @@ class LocationTrackingService : Service() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
     }
 
-    fun isTracking(): Boolean = isAutoTracking
+    fun isTracking(): Boolean = isTrackingActive
 
     override fun onDestroy() {
         super.onDestroy()
         stopLocationUpdates()
-        if (isAutoTracking) {
+        if (isTrackingActive) {
             stopForegroundService()
         }
     }

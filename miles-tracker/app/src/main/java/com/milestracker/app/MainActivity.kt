@@ -32,7 +32,6 @@ class MainActivity : AppCompatActivity() {
     
     private var locationService: LocationTrackingService? = null
     private var isServiceBound = false
-    private var isManuallyTracking = false
 
     private var currentMarker: Marker? = null
     private var routePolyline: Polyline? = null
@@ -133,12 +132,9 @@ class MainActivity : AppCompatActivity() {
         binding.startStopButton.setOnClickListener {
             if (locationService?.isTracking() == true) {
                 locationService?.stopManualTracking()
-                isManuallyTracking = false
             } else {
                 locationService?.startManualTracking()
-                isManuallyTracking = true
             }
-            updateButtons()
         }
         
         binding.clearButton.setOnClickListener {
@@ -232,6 +228,9 @@ class MainActivity : AppCompatActivity() {
             val last = points.last()
             binding.coordinatesValue.text = "%.6f, %.6f".format(last.latitude, last.longitude)
             binding.speedValue.text = "%.1f km/h".format(last.speed * 3.6f)
+        } else {
+             binding.coordinatesValue.text = "-"
+             binding.speedValue.text = "0.0 km/h"
         }
     }
     
@@ -247,7 +246,10 @@ class MainActivity : AppCompatActivity() {
         }
         currentMarker?.position = geoPoint
         
-        binding.mapView.controller.animateTo(geoPoint)
+        if(repository.getUpdateCount() < 2) {
+            binding.mapView.controller.animateTo(geoPoint)
+        }
+        
         binding.mapView.invalidate()
     }
     
