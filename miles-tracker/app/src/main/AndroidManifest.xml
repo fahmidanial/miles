@@ -35,6 +35,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".HistoryActivity"
+            android:exported="false"
+            android:label="Trip History"
+            android:parentActivityName=".MainActivity" />
         
         <!-- The critical service declaration with foregroundServiceType -->
         <service

@@ -204,4 +204,133 @@ class LocationRepository(context: Context) {
             }
         }
     }
+
+    private val tripsCollection = firestore.collection("users").document(getDeviceId()).collection("trips")
+
+    // ... existing code ...
+
+    suspend fun saveCurrentRouteToHistory() {
+        withContext(Dispatchers.IO) {
+            try {
+                val points = getLocalRoutePoints()
+                if (points.isNotEmpty()) {
+                    val route = Route(
+                        deviceId = getDeviceId(),
+                        startTimestamp = points.firstOrNull()?.timestamp ?: System.currentTimeMillis(),
+                        points = points,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                    
+                    // Use start timestamp as document ID for easy sorting/finding
+                    tripsCollection.document(route.startTimestamp.toString())
+                        .set(route)
+                        .await()
+                        
+                    Log.d(TAG, "Trip saved to history: ${route.startTimestamp}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to save trip history", e)
+                throw e
+            }
+        }
+    }
+
+    suspend fun getTripHistory(): List<Route> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val snapshot = tripsCollection
+                    .orderBy("startTimestamp", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                    .get()
+                    .await()
+                
+                return@withContext snapshot.documents.mapNotNull { it.toObject(Route::class.java) }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to get trip history", e)
+                emptyList()
+            }
+        }
+    }
+
+    suspend fun exportRouteToCsv(routeToExport: Route? = null): String? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val points = if (routeToExport != null) {
+                    routeToExport.points
+                } else {
+                    // Use local points directly to ensure we export the latest tracked data without network delay/staleness
+                    getLocalRoutePoints()
+                }
+                
+                if (points.isEmpty()) return@withContext null
+
+                val sortedPoints = points.sortedBy { it.timestamp }
+                val startPoint = sortedPoints.first()
+                val endPoint = sortedPoints.last()
+
+                var totalDistanceMeters = 0.0
+                for (i in 0 until sortedPoints.size - 1) {
+                    totalDistanceMeters += calculateDistance(
+                        sortedPoints[i].latitude, sortedPoints[i].longitude,
+                        sortedPoints[i+1].latitude, sortedPoints[i+1].longitude
+                    )
+                }
+                val totalDistanceKm = totalDistanceMeters / 1000.0
+
+                val startDate = java.util.Date(startPoint.timestamp)
+                val endDate = java.util.Date(endPoint.timestamp)
+                
+                // Format: YYYY-MM-DD
+                val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+                val dateStr = dateFormat.format(startDate)
+
+                // Format: h:mm a
+                val timeFormat = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
+                val startTimeStr = timeFormat.format(startDate)
+                val endTimeStr = timeFormat.format(endDate)
+
+                val durationMillis = endPoint.timestamp - startPoint.timestamp
+                val durationHours = durationMillis / (1000.0 * 60.0 * 60.0)
+
+                // Kilometers,From,To,Date,Purpose,Business Line,Time Started,Time Ended,Duration (hours),s,To Full Address,From Full Address
+                
+                // Using "lat, lng" format for address fields as requested
+                val fromAddress = "${startPoint.latitude}, ${startPoint.longitude}"
+                val toAddress = "${endPoint.latitude}, ${endPoint.longitude}"
+                
+                val row = StringBuilder()
+                row.append(String.format("%.2f", totalDistanceKm)).append(",") // Kilometers
+                row.append("\"$fromAddress\"").append(",") // From
+                row.append("\"$toAddress\"").append(",") // To
+                row.append(dateStr).append(",") // Date
+                row.append("").append(",") // Purpose (Food Services etc)
+                row.append("").append(",") // Business Line
+                row.append(startTimeStr).append(",") // Time Started
+                row.append(endTimeStr).append(",") // Time Ended
+                row.append(String.format("%.1f", durationHours)).append(",") // Duration (hours)
+                row.append("").append(",") // s
+                row.append("\"$toAddress\"").append(",") // To Full Address
+                row.append("\"$fromAddress\"") // From Full Address
+
+                return@withContext row.toString()
+            } catch (e: Exception) {
+                Log.e(TAG, "CSV Export failed", e)
+                null
+            }
+        }
+    }
+
+    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371e3 // Earth radius in meters
+        val phi1 = Math.toRadians(lat1)
+        val phi2 = Math.toRadians(lat2)
+        val deltaPhi = Math.toRadians(lat2 - lat1)
+        val deltaLambda = Math.toRadians(lon2 - lon1)
+
+        val a = Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+                Math.cos(phi1) * Math.cos(phi2) *
+                Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2)
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+        return r * c
+    }
 }

@@ -152,14 +152,48 @@ class MainActivity : AppCompatActivity() {
                 locationService?.startManualTracking()
             }
         }
+
+        binding.exportButton.setOnClickListener {
+            lifecycleScope.launch {
+                val csvData = repository.exportRouteToCsv()
+                if (csvData != null) {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Miles Tracker Route Export")
+                        putExtra(Intent.EXTRA_TEXT, csvData)
+                    }
+                    startActivity(Intent.createChooser(shareIntent, "Export Route CSV"))
+                } else {
+                    Toast.makeText(this@MainActivity, "No route data to export", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        binding.historyButton.setOnClickListener {
+            startActivity(Intent(this, HistoryActivity::class.java))
+        }
         
         binding.clearButton.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Clear Route")
-                .setMessage("This will clear all saved route data. Continue?")
-                .setPositiveButton("Clear") { _, _ ->
+                .setMessage("Do you want to save this trip to history before clearing?")
+                .setPositiveButton("Save & Clear") { _, _ ->
                     lifecycleScope.launch {
                         try {
+                            repository.saveCurrentRouteToHistory()
+                            repository.clearRoute()
+                            routePolyline?.actualPoints?.clear()
+                            binding.mapView.invalidate()
+                            updateUIFromRepository()
+                            Toast.makeText(this@MainActivity, "Trip saved and cleared", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(this@MainActivity, "Error saving/clearing", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+                .setNeutralButton("Clear Only") { _, _ ->
+                    lifecycleScope.launch {
+                         try {
                             repository.clearRoute()
                             routePolyline?.actualPoints?.clear()
                             binding.mapView.invalidate()
