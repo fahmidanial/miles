@@ -16,6 +16,9 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.android.gms.location.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class LocationTrackingService : Service() {
     
@@ -171,7 +174,13 @@ class LocationTrackingService : Service() {
         
         // Save data and update notification only when tracking
         if (isTrackingActive) {
-            repository.addLocationPoint(currentLat, currentLng, currentSpeed)
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    repository.addLocationPoint(currentLat, currentLng, currentSpeed)
+                } catch (e: Exception) {
+                    // Log error, but don't crash service
+                }
+            }
             updateNotification()
         }
     }

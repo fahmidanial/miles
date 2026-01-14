@@ -17,8 +17,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.milestracker.app.databinding.ActivityMainBinding
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -142,11 +144,17 @@ class MainActivity : AppCompatActivity() {
                 .setTitle("Clear Route")
                 .setMessage("This will clear all saved route data. Continue?")
                 .setPositiveButton("Clear") { _, _ ->
-                    repository.clearRoute()
-                    routePolyline?.actualPoints?.clear()
-                    binding.mapView.invalidate()
-                    updateUIFromRepository()
-                    Toast.makeText(this, "Route cleared", Toast.LENGTH_SHORT).show()
+                    lifecycleScope.launch {
+                        try {
+                            repository.clearRoute()
+                            routePolyline?.actualPoints?.clear()
+                            binding.mapView.invalidate()
+                            updateUIFromRepository()
+                            Toast.makeText(this@MainActivity, "Route cleared", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(this@MainActivity, "Error clearing route", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
@@ -222,15 +230,23 @@ class MainActivity : AppCompatActivity() {
     private fun updateUIFromRepository() {
         val updateCount = repository.getUpdateCount()
         binding.updateCountValue.text = "#$updateCount"
-        
-        val points = repository.getRoutePoints()
-        if (points.isNotEmpty()) {
-            val last = points.last()
-            binding.coordinatesValue.text = "%.6f, %.6f".format(last.latitude, last.longitude)
-            binding.speedValue.text = "%.1f km/h".format(last.speed * 3.6f)
-        } else {
-             binding.coordinatesValue.text = "-"
-             binding.speedValue.text = "0.0 km/h"
+
+        lifecycleScope.launch {
+            try {
+                val points = repository.getRoutePoints()
+                if (points.isNotEmpty()) {
+                    val last = points.last()
+                    binding.coordinatesValue.text = "%.6f, %.6f".format(last.latitude, last.longitude)
+                    binding.speedValue.text = "%.1f km/h".format(last.speed * 3.6f)
+                } else {
+                     binding.coordinatesValue.text = "-"
+                     binding.speedValue.text = "0.0 km/h"
+                }
+            } catch (e: Exception) {
+                // Handle error, maybe show toast
+                binding.coordinatesValue.text = "Error loading"
+                binding.speedValue.text = "0.0 km/h"
+            }
         }
     }
     
