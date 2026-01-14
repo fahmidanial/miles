@@ -9,9 +9,12 @@ import android.content.IntentFilter
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -37,6 +40,14 @@ class MainActivity : AppCompatActivity() {
 
     private var currentMarker: Marker? = null
     private var routePolyline: Polyline? = null
+
+    private val batteryLowReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == Intent.ACTION_BATTERY_LOW) {
+                showLowBatteryWarning()
+            }
+        }
+    }
     
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
@@ -113,6 +124,9 @@ class MainActivity : AppCompatActivity() {
         updateUIFromRepository()
         
         checkPermissionsAndStartService()
+        checkBatteryOptimizations()
+        
+        registerReceiver(batteryLowReceiver, IntentFilter(Intent.ACTION_BATTERY_LOW))
     }
     
     private fun setupMap() {
@@ -191,6 +205,32 @@ class MainActivity : AppCompatActivity() {
             startAndBindService()
         }
     }
+
+    private fun checkBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+                AlertDialog.Builder(this)
+                    .setTitle("Disable Battery Restrictions")
+                    .setMessage("To ensure accurate tracking, please disable battery optimizations for this app.")
+                    .setPositiveButton("Go to Settings") { _, _ ->
+                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        intent.data = Uri.parse("package:$packageName")
+                        startActivity(intent)
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+        }
+    }
+
+    private fun showLowBatteryWarning() {
+        AlertDialog.Builder(this)
+            .setTitle("Low Battery")
+            .setMessage("Your battery is low. Tracking accuracy may be affected, but we'll do our best to keep it running!")
+            .setPositiveButton("OK", null)
+            .show()
+    }
     
     private fun hasLocationPermission(): Boolean {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -198,7 +238,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun startAndBindService() {
         val serviceIntent = Intent(this, LocationTrackingService::class.java)
-        startService(serviceIntent)
+        ContextCompat.startForegroundService(this, serviceIntent)
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
     
@@ -243,7 +283,6 @@ class MainActivity : AppCompatActivity() {
                      binding.speedValue.text = "0.0 km/h"
                 }
             } catch (e: Exception) {
-                // Handle error, maybe show toast
                 binding.coordinatesValue.text = "Error loading"
                 binding.speedValue.text = "0.0 km/h"
             }
@@ -311,5 +350,6 @@ class MainActivity : AppCompatActivity() {
         if (isServiceBound) {
             unbindService(serviceConnection)
         }
+        unregisterReceiver(batteryLowReceiver)
     }
 }

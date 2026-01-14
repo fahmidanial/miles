@@ -13,11 +13,6 @@ import kotlinx.coroutines.withContext
 import org.osmdroid.util.GeoPoint
 import java.util.UUID
 
-/**
- * Repository for storing and retrieving location tracking data.
- * Uses Firebase Firestore for cloud storage with offline support.
- * Falls back to local SharedPreferences for immediate UI updates.
- */
 class LocationRepository(context: Context) {
 
     private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -34,12 +29,12 @@ class LocationRepository(context: Context) {
         private const val TAG = "LocationRepository"
     }
 
-    // Data classes
     data class LocationPoint(
         val latitude: Double = 0.0,
         val longitude: Double = 0.0,
         val speed: Float = 0f,
-        val timestamp: Long = 0L
+        val timestamp: Long = 0L,
+        val formattedTime: String = ""
     )
 
     data class Route(
@@ -58,38 +53,29 @@ class LocationRepository(context: Context) {
         return deviceId
     }
 
-    /**
-     * Save a new location point - syncs to Firebase Firestore
-     */
     suspend fun addLocationPoint(lat: Double, lng: Double, speed: Float) {
-        val point = LocationPoint(lat, lng, speed, System.currentTimeMillis())
+        val timestamp = System.currentTimeMillis()
+        val formattedTime = DateUtils.formatTimestamp(timestamp)
+        val point = LocationPoint(lat, lng, speed, timestamp, formattedTime)
 
-        // Save locally first for immediate UI updates
         saveLocally(listOf(point))
 
-        // Try to sync to Firestore
         try {
             withContext(Dispatchers.IO) {
                 syncToCloud()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to sync to Firestore", e)
-            // Data remains local, will sync later (Firestore has offline persistence)
         }
 
         incrementUpdateCount()
     }
 
-    /**
-     * Get all route points - uses Firestore with offline support
-     */
     suspend fun getRoutePoints(): List<LocationPoint> {
         return withContext(Dispatchers.IO) {
             try {
-                // Try to get from Firestore (works offline too due to caching)
                 val cloudPoints = getFromCloud()
                 if (cloudPoints.isNotEmpty()) {
-                    // Merge with local data
                     val localPoints = getLocalRoutePoints()
                     val merged = (cloudPoints + localPoints).distinctBy { it.timestamp }
                     return@withContext merged.sortedBy { it.timestamp }
@@ -98,14 +84,10 @@ class LocationRepository(context: Context) {
                 Log.e(TAG, "Failed to get from Firestore, using local", e)
             }
 
-            // Fallback to local
             getLocalRoutePoints()
         }
     }
 
-    /**
-     * Sync local data to Firestore
-     */
     suspend fun syncToCloud() {
         withContext(Dispatchers.IO) {
             val localPoints = getLocalRoutePoints()
@@ -123,7 +105,6 @@ class LocationRepository(context: Context) {
                         .set(route, SetOptions.merge())
                         .await()
                     Log.d(TAG, "Synced ${localPoints.size} points to Firestore")
-                    // Don't clear local data - Firestore handles merging
                 } catch (e: Exception) {
                     Log.e(TAG, "Firestore sync failed", e)
                     throw e
@@ -168,37 +149,23 @@ class LocationRepository(context: Context) {
         prefs.edit().remove(KEY_LOCAL_ROUTE_POINTS).apply()
     }
 
-    /**
-     * Get route points as GeoPoints for OSM
-     */
     fun getRouteAsGeoPoints(): List<GeoPoint> {
-        // For UI, use local data for immediate response
         return getLocalRoutePoints().map { GeoPoint(it.latitude, it.longitude) }
     }
 
-    /**
-     * Get location update count
-     */
     fun getUpdateCount(): Int {
         return prefs.getInt(KEY_UPDATE_COUNT, 0)
     }
 
-    /**
-     * Increment location update count
-     */
     private fun incrementUpdateCount() {
         val current = getUpdateCount()
         prefs.edit().putInt(KEY_UPDATE_COUNT, current + 1).apply()
     }
 
-    /**
-     * Clear all route data
-     */
     suspend fun clearRoute() {
         clearLocalData()
         prefs.edit().putInt(KEY_UPDATE_COUNT, 0).apply()
 
-        // Also clear Firestore data
         try {
             withContext(Dispatchers.IO) {
                 routesCollection.document(getDeviceId()).delete().await()
@@ -208,23 +175,14 @@ class LocationRepository(context: Context) {
         }
     }
 
-    /**
-     * Check if tracking was active (for service restart)
-     */
     fun isTrackingActive(): Boolean {
         return prefs.getBoolean(KEY_IS_TRACKING, false)
     }
 
-    /**
-     * Set tracking state
-     */
     fun setTrackingActive(active: Boolean) {
         prefs.edit().putBoolean(KEY_IS_TRACKING, active).apply()
     }
 
-    /**
-     * Export data as JSON string
-     */
     suspend fun exportData(): String? {
         return withContext(Dispatchers.IO) {
             try {

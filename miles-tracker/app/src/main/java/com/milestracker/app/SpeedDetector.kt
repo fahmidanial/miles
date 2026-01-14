@@ -1,9 +1,7 @@
 package com.milestracker.app
 
 import android.Manifest
-import android.content.BroadcastReceiver
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Looper
 import androidx.core.content.ContextCompat
@@ -81,22 +79,4 @@ class SpeedDetector(private val context: Context) {
     }
     
     fun isMonitoring() = isMonitoring
-}
-
-/**
- * Boot receiver to restart speed detection on device boot
- */
-class BootReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context?, intent: Intent?) {
-        if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-            context?.let {
-                val repository = LocationRepository(it)
-                if (repository.isTrackingActive()) {
-                    // Restart tracking service
-                    val serviceIntent = Intent(it, LocationTrackingService::class.java)
-                    ContextCompat.startForegroundService(it, serviceIntent)
-                }
-            }
-        }
-    }
 }

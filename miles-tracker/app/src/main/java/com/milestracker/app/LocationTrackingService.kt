@@ -1,5 +1,6 @@
 package com.milestracker.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -48,11 +49,9 @@ class LocationTrackingService : Service() {
         const val EXTRA_LONGITUDE = "longitude"
         const val EXTRA_SPEED = "speed"
         const val EXTRA_UPDATE_COUNT = "update_count"
-        
-        const val SPEED_THRESHOLD_KMH = 10f // Auto-start threshold
-        
-        private const val LOCATION_INTERVAL_MS = 3000L // 3 seconds
-        private const val FASTEST_INTERVAL_MS = 1000L // 1 second
+        const val SPEED_THRESHOLD_KMH = 10f
+        private const val LOCATION_INTERVAL_MS = 3000L
+        private const val FASTEST_INTERVAL_MS = 1000L
     }
     
     override fun onCreate() {
@@ -66,11 +65,11 @@ class LocationTrackingService : Service() {
         startLocationUpdates()
     }
     
-    override fun onBind(intent: Intent?): IBinder {
-        return binder
-    }
+    override fun onBind(intent: Intent?): IBinder = binder
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Immediately promote the service to a foreground service
+        startForeground(NOTIFICATION_ID, buildNotification(isTracking = false))
         return START_STICKY
     }
     
@@ -89,39 +88,23 @@ class LocationTrackingService : Service() {
     fun startManualTracking() {
         isManuallyStarted = true
         if (!isTrackingActive) {
-            startForegroundService()
+            isTrackingActive = true
+            repository.setTrackingActive(true)
+            updateNotification()
         }
     }
 
     fun stopManualTracking() {
         isManuallyStarted = false
-        if (isTrackingActive) {
-            stopForegroundService()
+        val speedKmh = currentSpeed * 3.6f
+        if (isTrackingActive && speedKmh < SPEED_THRESHOLD_KMH) {
+            isTrackingActive = false
+            repository.setTrackingActive(false)
+            updateNotification()
         }
     }
-
-    private fun startForegroundService() {
-        val notification = buildNotification()
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
-        
-        isTrackingActive = true
-        repository.setTrackingActive(true)
-    }
     
-    private fun stopForegroundService() {
-        stopForeground(true)
-        isTrackingActive = false
-        repository.setTrackingActive(false)
-        // Reset manual flag when service is stopped for any reason
-        isManuallyStarted = false
-    }
-    
-    private fun buildNotification(): Notification {
+    private fun buildNotification(isTracking: Boolean): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -130,14 +113,24 @@ class LocationTrackingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
-        val speedKmh = currentSpeed * 3.6f
-        val speedText = "%.1f km/h".format(speedKmh)
-        val coordsText = "%.6f, %.6f".format(currentLat, currentLng)
-        val updateCount = repository.getUpdateCount()
+        val title: String
+        val text: String
+
+        if (isTracking) {
+            val speedKmh = currentSpeed * 3.6f
+            val speedText = "%.1f km/h".format(speedKmh)
+            val coordsText = "%.6f, %.6f".format(currentLat, currentLng)
+            val updateCount = repository.getUpdateCount()
+            title = "🚗 Speed: $speedText"
+            text = "📍 $coordsText • #$updateCount updates"
+        } else {
+            title = "MilesTracker is active"
+            text = "Waiting for speed to exceed 10 km/h..."
+        }
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("🚗 Speed: $speedText")
-            .setContentText("📍 $coordsText • #$updateCount updates")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -149,9 +142,7 @@ class LocationTrackingService : Service() {
     private fun setupLocationCallback() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { location ->
-                    processLocation(location)
-                }
+                result.lastLocation?.let { processLocation(it) }
             }
         }
     }
@@ -162,34 +153,30 @@ class LocationTrackingService : Service() {
         currentSpeed = if (location.hasSpeed()) location.speed else 0f
         val speedKmh = currentSpeed * 3.6f
         
-        // Always broadcast to keep UI updated
         broadcastLocationUpdate()
         
-        // Auto-tracking logic
-        if (speedKmh >= SPEED_THRESHOLD_KMH && !isTrackingActive) {
-            startForegroundService()
-        } else if (speedKmh < SPEED_THRESHOLD_KMH && isTrackingActive && !isManuallyStarted) {
-            stopForegroundService()
-        }
-        
-        // Save data and update notification only when tracking
-        if (isTrackingActive) {
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    repository.addLocationPoint(currentLat, currentLng, currentSpeed)
-                } catch (e: Exception) {
-                    // Log error, but don't crash service
-                }
-            }
+        val shouldBeTracking = speedKmh >= SPEED_THRESHOLD_KMH || isManuallyStarted
+
+        if (shouldBeTracking && !isTrackingActive) {
+            isTrackingActive = true
+            repository.setTrackingActive(true)
+            updateNotification()
+        } else if (!shouldBeTracking && isTrackingActive) {
+            isTrackingActive = false
+            repository.setTrackingActive(false)
             updateNotification()
         }
+        
+        if (isTrackingActive) {
+            CoroutineScope(Dispatchers.IO).launch {
+                repository.addLocationPoint(currentLat, currentLng, currentSpeed)
+            }
+        }
+        updateNotification()
     }
     
     private fun updateNotification() {
-        if (isTrackingActive) {
-            val notification = buildNotification()
-            notificationManager.notify(NOTIFICATION_ID, notification)
-        }
+        notificationManager.notify(NOTIFICATION_ID, buildNotification(isTracking = isTrackingActive))
     }
     
     private fun broadcastLocationUpdate() {
@@ -208,15 +195,10 @@ class LocationTrackingService : Service() {
             LOCATION_INTERVAL_MS
         ).apply {
             setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
-            setWaitForAccurateLocation(false)
         }.build()
         
         try {
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest,
-                locationCallback,
-                Looper.getMainLooper()
-            )
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
         } catch (e: SecurityException) {
             stopSelf()
         }
@@ -231,8 +213,6 @@ class LocationTrackingService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         stopLocationUpdates()
-        if (isTrackingActive) {
-            stopForegroundService()
-        }
+        stopForeground(true)
     }
 }
