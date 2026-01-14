@@ -45,6 +45,7 @@ class LocationTrackingService : Service() {
         const val CHANNEL_ID = "location_tracking_channel"
         const val NOTIFICATION_ID = 1001
         const val ACTION_LOCATION_UPDATE = "com.milestracker.LOCATION_UPDATE"
+        const val ACTION_TRIP_FINISHED = "com.milestracker.TRIP_FINISHED"
         const val EXTRA_LATITUDE = "latitude"
         const val EXTRA_LONGITUDE = "longitude"
         const val EXTRA_SPEED = "speed"
@@ -53,7 +54,7 @@ class LocationTrackingService : Service() {
         private const val LOCATION_INTERVAL_MS = 3000L
         private const val FASTEST_INTERVAL_MS = 1000L
     }
-    
+
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -87,6 +88,7 @@ class LocationTrackingService : Service() {
     
     fun startManualTracking() {
         isManuallyStarted = true
+
         if (!isTrackingActive) {
             isTrackingActive = true
             repository.setTrackingActive(true)
@@ -98,6 +100,15 @@ class LocationTrackingService : Service() {
         isManuallyStarted = false
         val speedKmh = currentSpeed * 3.6f
         if (isTrackingActive && speedKmh < SPEED_THRESHOLD_KMH) {
+            // Instead of immediate stop, maybe we should also use the timer? 
+            // But manual stop usually means "I am done now".
+            // Let's keep manual stop immediate for now, or user choice.
+            // Prompt implied manual stop is manual.
+            
+            // Actually, if they hit stop, they probably want it saved. 
+            // But the prompt said "auto save and clear when speed less than 10".
+            // So this manual button logic remains strictly manual control.
+            
             isTrackingActive = false
             repository.setTrackingActive(false)
             updateNotification()
@@ -156,17 +167,21 @@ class LocationTrackingService : Service() {
         broadcastLocationUpdate()
         
         val shouldBeTracking = speedKmh >= SPEED_THRESHOLD_KMH || isManuallyStarted
-
-        if (shouldBeTracking && !isTrackingActive) {
-            isTrackingActive = true
-            repository.setTrackingActive(true)
-            updateNotification()
-        } else if (!shouldBeTracking && isTrackingActive) {
-            isTrackingActive = false
-            repository.setTrackingActive(false)
-            updateNotification()
-        }
         
+        if (shouldBeTracking) {
+             if (!isTrackingActive) {
+                isTrackingActive = true
+                repository.setTrackingActive(true)
+                updateNotification()
+             }
+        } else {
+            // Speed is low and not manually started
+            if (isTrackingActive) {
+                // Immediate Auto-Save
+                finishTripAutoSave()
+            }
+        }
+
         if (isTrackingActive) {
             CoroutineScope(Dispatchers.IO).launch {
                 repository.addLocationPoint(currentLat, currentLng, currentSpeed)
@@ -174,8 +189,34 @@ class LocationTrackingService : Service() {
         }
         updateNotification()
     }
+
+
+    
+    private fun finishTripAutoSave() {
+        isTrackingActive = false
+
+        repository.setTrackingActive(false)
+        updateNotification()
+        
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                repository.saveCurrentRouteToHistory()
+                repository.clearRoute()
+                
+                // Broadcast that we finished
+                val intent = Intent(ACTION_TRIP_FINISHED)
+                LocalBroadcastManager.getInstance(this@LocationTrackingService).sendBroadcast(intent)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+
     
     private fun updateNotification() {
+        // Updated to show "Auto-stop pending" if applicable?
+        // Keeping it simple for now or parsing "isAutoStopScheduled"
         notificationManager.notify(NOTIFICATION_ID, buildNotification(isTracking = isTrackingActive))
     }
     

@@ -29,7 +29,7 @@ class HistoryAdapter(
         
         // Date Format
         val date = Date(trip.startTimestamp)
-        val dateFormat = SimpleDateFormat("MMM d, yyyy • h:mm a", Locale.getDefault())
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd • h:mm a", Locale.getDefault())
         holder.binding.dateText.text = dateFormat.format(date)
 
         // Calculate Stats (Recalculating here for display, ideally should be stored in Route object or helper)
