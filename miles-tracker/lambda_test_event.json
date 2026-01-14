@@ -1,0 +1,6 @@
+{
+  "httpMethod": "POST",
+  "path": "/routes",
+  "pathParameters": {},
+  "body": "{\"deviceId\":\"test-device-123\",\"points\":[{\"latitude\":3.1390,\"longitude\":101.6869,\"speed\":25.5,\"timestamp\":1705212000000}]}"
+}
