@@ -32,8 +32,8 @@ class MainActivity : AppCompatActivity() {
     
     private var locationService: LocationTrackingService? = null
     private var isServiceBound = false
-    private var isTracking = false
-    
+    private var isManuallyTracking = false
+
     private var currentMarker: Marker? = null
     private var routePolyline: Polyline? = null
     
@@ -42,13 +42,13 @@ class MainActivity : AppCompatActivity() {
             val binder = service as LocationTrackingService.LocalBinder
             locationService = binder.getService()
             isServiceBound = true
-            updateTrackingState(true)
+            updateButtons()
         }
         
         override fun onServiceDisconnected(name: ComponentName?) {
             locationService = null
             isServiceBound = false
-            updateTrackingState(false)
+            updateButtons()
         }
     }
     
@@ -62,7 +62,10 @@ class MainActivity : AppCompatActivity() {
                 
                 updateUI(lat, lng, speed, updateCount)
                 updateMapLocation(lat, lng)
-                updateRoute()
+                if (locationService?.isTracking() == true) {
+                    updateRoute()
+                }
+                updateButtons()
             }
         }
     }
@@ -83,25 +86,18 @@ class MainActivity : AppCompatActivity() {
     private val backgroundPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) {
-            checkNotificationPermission()
-        } else {
-            // Still allow tracking without background permission
-            checkNotificationPermission()
-        }
+        checkNotificationPermission()
     }
     
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        // Start tracking regardless of notification permission
-        startTracking()
+        startAndBindService()
     }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Initialize OSMDroid configuration
         Configuration.getInstance().load(this, getSharedPreferences("osm_prefs", MODE_PRIVATE))
         Configuration.getInstance().userAgentValue = packageName
         
@@ -115,10 +111,7 @@ class MainActivity : AppCompatActivity() {
         loadSavedRoute()
         updateUIFromRepository()
         
-        // Check if service was running
-        if (repository.isTrackingActive()) {
-            bindToService()
-        }
+        checkPermissionsAndStartService()
     }
     
     private fun setupMap() {
@@ -126,12 +119,9 @@ class MainActivity : AppCompatActivity() {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             controller.setZoom(18.0)
-            
-            // Default location (will be updated when tracking starts)
             controller.setCenter(GeoPoint(0.0, 0.0))
         }
         
-        // Initialize route polyline
         routePolyline = Polyline().apply {
             outlinePaint.color = Color.parseColor("#2196F3")
             outlinePaint.strokeWidth = 8f
@@ -141,11 +131,14 @@ class MainActivity : AppCompatActivity() {
     
     private fun setupButtons() {
         binding.startStopButton.setOnClickListener {
-            if (isTracking) {
-                stopTracking()
+            if (locationService?.isTracking() == true) {
+                locationService?.stopManualTracking()
+                isManuallyTracking = false
             } else {
-                checkPermissionsAndStart()
+                locationService?.startManualTracking()
+                isManuallyTracking = true
             }
+            updateButtons()
         }
         
         binding.clearButton.setOnClickListener {
@@ -163,114 +156,59 @@ class MainActivity : AppCompatActivity() {
                 .show()
         }
     }
-    
-    private fun checkPermissionsAndStart() {
+
+    private fun checkPermissionsAndStartService() {
         when {
-            hasLocationPermission() -> {
-                checkBackgroundLocationPermission()
-            }
-            else -> {
-                locationPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
-                )
-            }
+            hasLocationPermission() -> checkBackgroundLocationPermission()
+            else -> locationPermissionLauncher.launch(arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ))
         }
     }
     
     private fun checkBackgroundLocationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.ACCESS_BACKGROUND_LOCATION
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                AlertDialog.Builder(this)
-                    .setTitle("Background Location")
-                    .setMessage("For continuous tracking, please allow 'All the time' location access.")
-                    .setPositiveButton("Grant") { _, _ ->
-                        backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                    }
-                    .setNegativeButton("Skip") { _, _ ->
-                        checkNotificationPermission()
-                    }
-                    .show()
-            } else {
-                checkNotificationPermission()
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            AlertDialog.Builder(this)
+                .setTitle("Background Location")
+                .setMessage("For auto-tracking, please allow 'All the time' location access.")
+                .setPositiveButton("Grant") { _, _ -> backgroundPermissionLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }
+                .setNegativeButton("Skip") { _, _ -> checkNotificationPermission() }
+                .show()
         } else {
             checkNotificationPermission()
         }
     }
     
     private fun checkNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(
-                    this, Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            } else {
-                startTracking()
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
-            startTracking()
+            startAndBindService()
         }
     }
     
     private fun hasLocationPermission(): Boolean {
-        return ContextCompat.checkSelfPermission(
-            this, Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     }
     
-    private fun startTracking() {
+    private fun startAndBindService() {
         val serviceIntent = Intent(this, LocationTrackingService::class.java)
-        startForegroundService(serviceIntent)
-        bindToService()
-    }
-    
-    private fun bindToService() {
-        val serviceIntent = Intent(this, LocationTrackingService::class.java)
+        startService(serviceIntent)
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
     
-    private fun stopTracking() {
-        if (isServiceBound) {
-            unbindService(serviceConnection)
-            isServiceBound = false
-        }
-        stopService(Intent(this, LocationTrackingService::class.java))
-        locationService = null
-        updateTrackingState(false)
-    }
-    
-    private fun updateTrackingState(tracking: Boolean) {
-        isTracking = tracking
-        
+    private fun updateButtons() {
+        val isCurrentlyTracking = locationService?.isTracking() == true
         binding.startStopButton.apply {
-            text = if (tracking) getString(R.string.stop_tracking) else getString(R.string.start_tracking)
-            setBackgroundColor(
-                ContextCompat.getColor(
-                    this@MainActivity,
-                    if (tracking) R.color.error else R.color.success
-                )
-            )
-            setIconResource(
-                if (tracking) android.R.drawable.ic_media_pause 
-                else android.R.drawable.ic_media_play
-            )
+            text = if (isCurrentlyTracking) getString(R.string.stop_tracking) else getString(R.string.start_tracking)
+            setBackgroundColor(ContextCompat.getColor(this@MainActivity, if (isCurrentlyTracking) R.color.error else R.color.success))
+            setIconResource(if (isCurrentlyTracking) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play)
         }
         
         binding.trackingStatus.apply {
-            text = if (tracking) "● TRACKING" else "● INACTIVE"
-            setTextColor(
-                ContextCompat.getColor(
-                    this@MainActivity,
-                    if (tracking) R.color.success else R.color.text_secondary
-                )
-            )
+            text = if (isCurrentlyTracking) "● TRACKING" else "● INACTIVE"
+            setTextColor(ContextCompat.getColor(this@MainActivity, if (isCurrentlyTracking) R.color.success else R.color.text_secondary))
         }
     }
     
@@ -280,12 +218,8 @@ class MainActivity : AppCompatActivity() {
         binding.coordinatesValue.text = "%.6f, %.6f".format(lat, lng)
         binding.updateCountValue.text = "#$updateCount"
         
-        // Change speed color based on threshold
         binding.speedValue.setTextColor(
-            ContextCompat.getColor(
-                this,
-                if (speedKmh >= LocationTrackingService.SPEED_THRESHOLD_KMH) R.color.success else R.color.secondary
-            )
+            ContextCompat.getColor(this, if (speedKmh >= LocationTrackingService.SPEED_THRESHOLD_KMH) R.color.success else R.color.secondary)
         )
     }
     
@@ -304,7 +238,6 @@ class MainActivity : AppCompatActivity() {
     private fun updateMapLocation(lat: Double, lng: Double) {
         val geoPoint = GeoPoint(lat, lng)
         
-        // Update or create marker
         if (currentMarker == null) {
             currentMarker = Marker(binding.mapView).apply {
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -314,7 +247,6 @@ class MainActivity : AppCompatActivity() {
         }
         currentMarker?.position = geoPoint
         
-        // Center map on current location
         binding.mapView.controller.animateTo(geoPoint)
         binding.mapView.invalidate()
     }
@@ -329,12 +261,9 @@ class MainActivity : AppCompatActivity() {
         val geoPoints = repository.getRouteAsGeoPoints()
         if (geoPoints.isNotEmpty()) {
             routePolyline?.setPoints(geoPoints)
-            
-            // Center on last known position
             val lastPoint = geoPoints.last()
             binding.mapView.controller.setCenter(lastPoint)
             
-            // Add marker at last position
             currentMarker = Marker(binding.mapView).apply {
                 position = lastPoint
                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -347,13 +276,8 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         binding.mapView.onResume()
-        
-        LocalBroadcastManager.getInstance(this).registerReceiver(
-            locationReceiver,
-            IntentFilter(LocationTrackingService.ACTION_LOCATION_UPDATE)
-        )
-        
-        // Refresh route on resume
+        LocalBroadcastManager.getInstance(this).registerReceiver(locationReceiver, IntentFilter(LocationTrackingService.ACTION_LOCATION_UPDATE))
+        updateButtons()
         updateRoute()
         updateUIFromRepository()
     }

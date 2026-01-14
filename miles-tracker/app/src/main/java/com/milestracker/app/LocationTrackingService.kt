@@ -17,11 +17,6 @@ import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.android.gms.location.*
 
-/**
- * Foreground service for continuous location tracking.
- * Shows speed and coordinates in notification.
- * Can auto-start when speed exceeds threshold.
- */
 class LocationTrackingService : Service() {
     
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -32,7 +27,7 @@ class LocationTrackingService : Service() {
     private var currentSpeed: Float = 0f
     private var currentLat: Double = 0.0
     private var currentLng: Double = 0.0
-    private var isTracking = false
+    private var isAutoTracking = false
     
     private val binder = LocalBinder()
     
@@ -63,6 +58,7 @@ class LocationTrackingService : Service() {
         
         createNotificationChannel()
         setupLocationCallback()
+        startLocationUpdates()
     }
     
     override fun onBind(intent: Intent?): IBinder {
@@ -70,8 +66,6 @@ class LocationTrackingService : Service() {
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundService()
-        startLocationUpdates()
         return START_STICKY
     }
     
@@ -87,6 +81,18 @@ class LocationTrackingService : Service() {
         notificationManager.createNotificationChannel(channel)
     }
     
+    fun startManualTracking() {
+        if (!isAutoTracking) {
+            startForegroundService()
+        }
+    }
+
+    fun stopManualTracking() {
+        if (isAutoTracking) {
+            stopForegroundService()
+        }
+    }
+
     private fun startForegroundService() {
         val notification = buildNotification()
         
@@ -96,8 +102,14 @@ class LocationTrackingService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
         
-        isTracking = true
+        isAutoTracking = true
         repository.setTrackingActive(true)
+    }
+    
+    private fun stopForegroundService() {
+        stopForeground(true)
+        isAutoTracking = false
+        repository.setTrackingActive(false)
     }
     
     private fun buildNotification(): Notification {
@@ -109,7 +121,7 @@ class LocationTrackingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
-        val speedKmh = currentSpeed * 3.6f // Convert m/s to km/h
+        val speedKmh = currentSpeed * 3.6f
         val speedText = "%.1f km/h".format(speedKmh)
         val coordsText = "%.6f, %.6f".format(currentLat, currentLng)
         val updateCount = repository.getUpdateCount()
@@ -139,20 +151,30 @@ class LocationTrackingService : Service() {
         currentLat = location.latitude
         currentLng = location.longitude
         currentSpeed = if (location.hasSpeed()) location.speed else 0f
+        val speedKmh = currentSpeed * 3.6f
         
-        // Save to repository
-        repository.addLocationPoint(currentLat, currentLng, currentSpeed)
-        
-        // Update notification
-        updateNotification()
-        
-        // Broadcast update to activity
+        // Always broadcast to keep UI updated
         broadcastLocationUpdate()
+        
+        // Auto-tracking logic
+        if (speedKmh >= SPEED_THRESHOLD_KMH && !isAutoTracking) {
+            startForegroundService()
+        } else if (speedKmh < SPEED_THRESHOLD_KMH && isAutoTracking) {
+            // Add a check to not stop if manually started - this will be handled in MainActivity
+        }
+        
+        // Save data and update notification only when tracking
+        if (isAutoTracking) {
+            repository.addLocationPoint(currentLat, currentLng, currentSpeed)
+            updateNotification()
+        }
     }
     
     private fun updateNotification() {
-        val notification = buildNotification()
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        if (isAutoTracking) {
+            val notification = buildNotification()
+            notificationManager.notify(NOTIFICATION_ID, notification)
+        }
     }
     
     private fun broadcastLocationUpdate() {
@@ -181,7 +203,6 @@ class LocationTrackingService : Service() {
                 Looper.getMainLooper()
             )
         } catch (e: SecurityException) {
-            // Permission not granted
             stopSelf()
         }
     }
@@ -189,17 +210,14 @@ class LocationTrackingService : Service() {
     private fun stopLocationUpdates() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
     }
-    
-    fun getCurrentLocation(): Pair<Double, Double> = Pair(currentLat, currentLng)
-    
-    fun getCurrentSpeedKmh(): Float = currentSpeed * 3.6f
-    
-    fun getUpdateCount(): Int = repository.getUpdateCount()
-    
+
+    fun isTracking(): Boolean = isAutoTracking
+
     override fun onDestroy() {
         super.onDestroy()
         stopLocationUpdates()
-        isTracking = false
-        repository.setTrackingActive(false)
+        if (isAutoTracking) {
+            stopForegroundService()
+        }
     }
 }
