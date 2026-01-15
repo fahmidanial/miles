@@ -6,6 +6,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background"
+    android:fitsSystemWindows="true"
     tools:context=".MainActivity">
 
     <!-- Top Bar Container -->
@@ -16,6 +17,20 @@
         android:orientation="horizontal"
         android:padding="16dp"
         app:layout_constraintTop_toTopOf="parent">
+
+        <!-- Settings Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/settingsButton"
+            style="@style/Widget.Material3.Button.IconButton.Filled.Tonal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:backgroundTint="@color/surface_variant"
+            app:icon="@android:drawable/ic_menu_preferences"
+            app:iconTint="@color/text_primary" />
+
+        <View
+            android:layout_width="8dp"
+            android:layout_height="0dp" />
 
         <!-- Classification Toggle -->
         <com.google.android.material.button.MaterialButton
@@ -32,7 +47,7 @@
             app:iconTint="@color/secondary" />
 
         <View
-            android:layout_width="12dp"
+            android:layout_width="8dp"
             android:layout_height="0dp" />
 
         <!-- History Button -->
@@ -197,7 +212,10 @@
         android:id="@+id/controlsCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="16dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="16dp"
+        android:paddingBottom="48dp"
         android:orientation="horizontal"
         app:layout_constraintBottom_toBottomOf="parent">
 
@@ -208,14 +226,15 @@
             android:layout_height="64dp"
             android:layout_weight="1"
             android:text="@string/start_tracking"
-            android:textSize="16sp"
+            android:textSize="14sp"
             android:textStyle="bold"
+            android:gravity="center"
             app:backgroundTint="@color/success"
             app:cornerRadius="32dp"
             app:icon="@android:drawable/ic_media_play"
             app:iconSize="24dp"
             app:iconGravity="textStart"
-            app:iconPadding="12dp" />
+            app:iconPadding="8dp" />
 
         <View
             android:layout_width="12dp"

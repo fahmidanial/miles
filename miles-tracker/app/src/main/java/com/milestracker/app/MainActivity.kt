@@ -69,7 +69,6 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent?.let {
                 if (it.action == LocationTrackingService.ACTION_TRIP_FINISHED) {
-                    playStopRingtone()
                     checkClassificationReminder()
                     updateButtons()
                 } else {
@@ -220,6 +219,10 @@ class MainActivity : AppCompatActivity() {
         binding.classificationButton.setOnClickListener {
             cycleClassification()
         }
+        
+        binding.settingsButton.setOnClickListener {
+            showSettingsDialog()
+        }
     }
 
     private fun cycleClassification() {
@@ -257,6 +260,52 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             e.printStackTrace()
         }
+    }
+
+    private fun showSettingsDialog() {
+        val currentSpeed = repository.getMinSpeedThreshold()
+        val isSoundEnabled = repository.getPlayStopSound()
+
+        val context = this
+        val layout = android.widget.LinearLayout(context).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(50, 40, 50, 10)
+        }
+
+        val speedLabel = android.widget.TextView(context).apply {
+            text = "Auto-Start Speed Threshold (km/h)"
+            textSize = 16f
+            setPadding(0, 0, 0, 10)
+        }
+        layout.addView(speedLabel)
+
+        val speedInput = android.widget.EditText(context).apply {
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText(currentSpeed.toString())
+        }
+        layout.addView(speedInput)
+
+        val soundSwitch = com.google.android.material.materialswitch.MaterialSwitch(context).apply {
+            text = "Play Sound on Stop"
+            isChecked = isSoundEnabled
+            setPadding(0, 30, 0, 0)
+        }
+        layout.addView(soundSwitch)
+
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Settings")
+            .setView(layout)
+            .setPositiveButton("Save") { _, _ ->
+                val newSpeedStr = speedInput.text.toString()
+                val newSpeed = newSpeedStr.toFloatOrNull() ?: 10f
+                 
+                repository.setMinSpeedThreshold(newSpeed)
+                repository.setPlayStopSound(soundSwitch.isChecked)
+                Toast.makeText(context, "Settings saved", Toast.LENGTH_SHORT).show()
+                updateButtons() // Refresh UI if needed
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun checkClassificationReminder() {
