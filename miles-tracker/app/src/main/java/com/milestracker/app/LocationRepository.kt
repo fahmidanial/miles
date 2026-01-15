@@ -25,8 +25,10 @@ class LocationRepository(context: Context) {
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_LOCAL_ROUTE_POINTS = "local_route_points"
         private const val KEY_UPDATE_COUNT = "update_count"
-        private const val KEY_IS_TRACKING = "is_tracking"
+        private const val KEY_TRACKING_ACTIVE = "tracking_active" // Updated to match usage
         private const val KEY_CURRENT_CLASSIFICATION = "current_classification"
+        private const val KEY_MIN_SPEED_THRESHOLD = "min_speed_threshold"
+        private const val KEY_PLAY_STOP_SOUND = "play_stop_sound"
         private const val TAG = "LocationRepository"
     }
 
@@ -177,12 +179,12 @@ class LocationRepository(context: Context) {
         }
     }
 
-    fun isTrackingActive(): Boolean {
-        return prefs.getBoolean(KEY_IS_TRACKING, false)
+    fun setTrackingActive(active: Boolean) {
+        prefs.edit().putBoolean(KEY_TRACKING_ACTIVE, active).apply()
     }
 
-    fun setTrackingActive(active: Boolean) {
-        prefs.edit().putBoolean(KEY_IS_TRACKING, active).apply()
+    fun isTrackingActive(): Boolean {
+        return prefs.getBoolean(KEY_TRACKING_ACTIVE, false)
     }
 
     fun setTripClassification(classification: String) {
@@ -191,6 +193,22 @@ class LocationRepository(context: Context) {
 
     fun getTripClassification(): String {
         return prefs.getString(KEY_CURRENT_CLASSIFICATION, "Unclassified") ?: "Unclassified"
+    }
+    
+    fun setMinSpeedThreshold(speedKmh: Float) {
+        prefs.edit().putFloat(KEY_MIN_SPEED_THRESHOLD, speedKmh).apply()
+    }
+
+    fun getMinSpeedThreshold(): Float {
+        return prefs.getFloat(KEY_MIN_SPEED_THRESHOLD, 10f) // Default 10 km/h
+    }
+    
+    fun setPlayStopSound(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_PLAY_STOP_SOUND, enabled).apply()
+    }
+
+    fun getPlayStopSound(): Boolean {
+        return prefs.getBoolean(KEY_PLAY_STOP_SOUND, true) // Default true
     }
 
     suspend fun exportData(): String? {

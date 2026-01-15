@@ -111,7 +111,8 @@ class LocationTrackingService : Service() {
     fun stopManualTracking() {
         isManuallyStarted = false
         val speedKmh = currentSpeed * 3.6f
-        if (isTrackingActive && speedKmh < SPEED_THRESHOLD_KMH) {
+        val minSpeedThreshold = repository.getMinSpeedThreshold()
+        if (isTrackingActive && speedKmh < minSpeedThreshold) {
             // Instead of immediate stop, maybe we should also use the timer? 
             // But manual stop usually means "I am done now".
             // Let's keep manual stop immediate for now, or user choice.
@@ -149,8 +150,9 @@ class LocationTrackingService : Service() {
             title = "🚗 Speed: $speedText"
             text = "📍 $coordsText • #$updateCount updates"
         } else {
+            val minSpeed = repository.getMinSpeedThreshold()
             title = "MilesTracker is active"
-            text = "Waiting for speed to exceed 10 km/h..."
+            text = "Waiting for speed to exceed ${minSpeed.toInt()} km/h..."
         }
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
@@ -180,7 +182,8 @@ class LocationTrackingService : Service() {
         
         broadcastLocationUpdate()
         
-        val shouldBeTracking = speedKmh >= SPEED_THRESHOLD_KMH || isManuallyStarted
+        val minSpeedThreshold = repository.getMinSpeedThreshold()
+        val shouldBeTracking = speedKmh >= minSpeedThreshold || isManuallyStarted
         
         if (shouldBeTracking) {
              if (!isTrackingActive) {
@@ -274,6 +277,8 @@ class LocationTrackingService : Service() {
         stopForeground(true)
     }
     private fun playStopRingtone() {
+        if (!repository.getPlayStopSound()) return // Don't play if disabled settings
+        
         try {
             val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
             val r = RingtoneManager.getRingtone(applicationContext, notification)
