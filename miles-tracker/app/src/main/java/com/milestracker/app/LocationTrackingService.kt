@@ -1,5 +1,6 @@
 package com.milestracker.app
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -16,12 +17,10 @@ import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import com.google.android.gms.location.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
-/**
- * Foreground service for continuous location tracking.
- * Shows speed and coordinates in notification.
- * Can auto-start when speed exceeds threshold.
- */
 class LocationTrackingService : Service() {
     
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -32,7 +31,9 @@ class LocationTrackingService : Service() {
     private var currentSpeed: Float = 0f
     private var currentLat: Double = 0.0
     private var currentLng: Double = 0.0
-    private var isTracking = false
+    
+    private var isTrackingActive = false
+    private var isManuallyStarted = false
     
     private val binder = LocalBinder()
     
@@ -44,17 +45,16 @@ class LocationTrackingService : Service() {
         const val CHANNEL_ID = "location_tracking_channel"
         const val NOTIFICATION_ID = 1001
         const val ACTION_LOCATION_UPDATE = "com.milestracker.LOCATION_UPDATE"
+        const val ACTION_TRIP_FINISHED = "com.milestracker.TRIP_FINISHED"
         const val EXTRA_LATITUDE = "latitude"
         const val EXTRA_LONGITUDE = "longitude"
         const val EXTRA_SPEED = "speed"
         const val EXTRA_UPDATE_COUNT = "update_count"
-        
-        const val SPEED_THRESHOLD_KMH = 10f // Auto-start threshold
-        
-        private const val LOCATION_INTERVAL_MS = 3000L // 3 seconds
-        private const val FASTEST_INTERVAL_MS = 1000L // 1 second
+        const val SPEED_THRESHOLD_KMH = 10f
+        private const val LOCATION_INTERVAL_MS = 3000L
+        private const val FASTEST_INTERVAL_MS = 1000L
     }
-    
+
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -63,15 +63,14 @@ class LocationTrackingService : Service() {
         
         createNotificationChannel()
         setupLocationCallback()
+        startLocationUpdates()
     }
     
-    override fun onBind(intent: Intent?): IBinder {
-        return binder
-    }
+    override fun onBind(intent: Intent?): IBinder = binder
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForegroundService()
-        startLocationUpdates()
+        // Immediately promote the service to a foreground service
+        startForeground(NOTIFICATION_ID, buildNotification(isTracking = false))
         return START_STICKY
     }
     
@@ -87,20 +86,36 @@ class LocationTrackingService : Service() {
         notificationManager.createNotificationChannel(channel)
     }
     
-    private fun startForegroundService() {
-        val notification = buildNotification()
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+    fun startManualTracking() {
+        isManuallyStarted = true
+
+        if (!isTrackingActive) {
+            isTrackingActive = true
+            repository.setTrackingActive(true)
+            updateNotification()
         }
-        
-        isTracking = true
-        repository.setTrackingActive(true)
+    }
+
+    fun stopManualTracking() {
+        isManuallyStarted = false
+        val speedKmh = currentSpeed * 3.6f
+        if (isTrackingActive && speedKmh < SPEED_THRESHOLD_KMH) {
+            // Instead of immediate stop, maybe we should also use the timer? 
+            // But manual stop usually means "I am done now".
+            // Let's keep manual stop immediate for now, or user choice.
+            // Prompt implied manual stop is manual.
+            
+            // Actually, if they hit stop, they probably want it saved. 
+            // But the prompt said "auto save and clear when speed less than 10".
+            // So this manual button logic remains strictly manual control.
+            
+            isTrackingActive = false
+            repository.setTrackingActive(false)
+            updateNotification()
+        }
     }
     
-    private fun buildNotification(): Notification {
+    private fun buildNotification(isTracking: Boolean): Notification {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
@@ -109,14 +124,24 @@ class LocationTrackingService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         
-        val speedKmh = currentSpeed * 3.6f // Convert m/s to km/h
-        val speedText = "%.1f km/h".format(speedKmh)
-        val coordsText = "%.6f, %.6f".format(currentLat, currentLng)
-        val updateCount = repository.getUpdateCount()
+        val title: String
+        val text: String
+
+        if (isTracking) {
+            val speedKmh = currentSpeed * 3.6f
+            val speedText = "%.1f km/h".format(speedKmh)
+            val coordsText = "%.6f, %.6f".format(currentLat, currentLng)
+            val updateCount = repository.getUpdateCount()
+            title = "🚗 Speed: $speedText"
+            text = "📍 $coordsText • #$updateCount updates"
+        } else {
+            title = "MilesTracker is active"
+            text = "Waiting for speed to exceed 10 km/h..."
+        }
         
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("🚗 Speed: $speedText")
-            .setContentText("📍 $coordsText • #$updateCount updates")
+            .setContentTitle(title)
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
             .setContentIntent(pendingIntent)
@@ -128,9 +153,7 @@ class LocationTrackingService : Service() {
     private fun setupLocationCallback() {
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(result: LocationResult) {
-                result.lastLocation?.let { location ->
-                    processLocation(location)
-                }
+                result.lastLocation?.let { processLocation(it) }
             }
         }
     }
@@ -139,20 +162,62 @@ class LocationTrackingService : Service() {
         currentLat = location.latitude
         currentLng = location.longitude
         currentSpeed = if (location.hasSpeed()) location.speed else 0f
+        val speedKmh = currentSpeed * 3.6f
         
-        // Save to repository
-        repository.addLocationPoint(currentLat, currentLng, currentSpeed)
+        broadcastLocationUpdate()
         
-        // Update notification
+        val shouldBeTracking = speedKmh >= SPEED_THRESHOLD_KMH || isManuallyStarted
+        
+        if (shouldBeTracking) {
+             if (!isTrackingActive) {
+                isTrackingActive = true
+                repository.setTrackingActive(true)
+                updateNotification()
+             }
+        } else {
+            // Speed is low and not manually started
+            if (isTrackingActive) {
+                // Immediate Auto-Save
+                finishTripAutoSave()
+            }
+        }
+
+        if (isTrackingActive) {
+            CoroutineScope(Dispatchers.IO).launch {
+                repository.addLocationPoint(currentLat, currentLng, currentSpeed)
+            }
+        }
+        updateNotification()
+    }
+
+
+    
+    private fun finishTripAutoSave() {
+        isTrackingActive = false
+
+        repository.setTrackingActive(false)
         updateNotification()
         
-        // Broadcast update to activity
-        broadcastLocationUpdate()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                repository.saveCurrentRouteToHistory()
+                repository.clearRoute()
+                
+                // Broadcast that we finished
+                val intent = Intent(ACTION_TRIP_FINISHED)
+                LocalBroadcastManager.getInstance(this@LocationTrackingService).sendBroadcast(intent)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
+
+
     
     private fun updateNotification() {
-        val notification = buildNotification()
-        notificationManager.notify(NOTIFICATION_ID, notification)
+        // Updated to show "Auto-stop pending" if applicable?
+        // Keeping it simple for now or parsing "isAutoStopScheduled"
+        notificationManager.notify(NOTIFICATION_ID, buildNotification(isTracking = isTrackingActive))
     }
     
     private fun broadcastLocationUpdate() {
@@ -171,17 +236,11 @@ class LocationTrackingService : Service() {
             LOCATION_INTERVAL_MS
         ).apply {
             setMinUpdateIntervalMillis(FASTEST_INTERVAL_MS)
-            setWaitForAccurateLocation(false)
         }.build()
         
         try {
-            fusedLocationClient.requestLocationUpdates(
-                locationRequest,
-                locationCallback,
-                Looper.getMainLooper()
-            )
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, Looper.getMainLooper())
         } catch (e: SecurityException) {
-            // Permission not granted
             stopSelf()
         }
     }
@@ -189,17 +248,12 @@ class LocationTrackingService : Service() {
     private fun stopLocationUpdates() {
         fusedLocationClient.removeLocationUpdates(locationCallback)
     }
-    
-    fun getCurrentLocation(): Pair<Double, Double> = Pair(currentLat, currentLng)
-    
-    fun getCurrentSpeedKmh(): Float = currentSpeed * 3.6f
-    
-    fun getUpdateCount(): Int = repository.getUpdateCount()
-    
+
+    fun isTracking(): Boolean = isTrackingActive
+
     override fun onDestroy() {
         super.onDestroy()
         stopLocationUpdates()
-        isTracking = false
-        repository.setTrackingActive(false)
+        stopForeground(true)
     }
 }
