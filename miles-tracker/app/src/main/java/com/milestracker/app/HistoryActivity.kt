@@ -8,7 +8,15 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.milestracker.app.databinding.ActivityHistoryBinding
+import androidx.recyclerview.widget.ItemTouchHelper
+import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.snackbar.Snackbar
+
 import kotlinx.coroutines.launch
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import androidx.core.content.ContextCompat
 
 class HistoryActivity : AppCompatActivity() {
 
@@ -105,11 +113,96 @@ class HistoryActivity : AppCompatActivity() {
     }
 
     private fun setupRecyclerView() {
-        adapter = HistoryAdapter(emptyList()) { trip ->
-            exportTrip(trip)
-        }
+        adapter = HistoryAdapter(
+            emptyList(),
+            onExportClick = { trip -> exportTrip(trip) },
+            onDeleteClick = { trip -> showDeleteConfirmation(trip) }
+        )
         binding.historyRecyclerView.layoutManager = LinearLayoutManager(this)
         binding.historyRecyclerView.adapter = adapter
+
+        val swipeCallback = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
+            override fun onMove(recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, target: RecyclerView.ViewHolder): Boolean {
+                return false
+            }
+
+            override fun onSwiped(viewHolder: RecyclerView.ViewHolder, direction: Int) {
+                val position = viewHolder.adapterPosition
+                val trip = adapter.getTripAt(position)
+                val originalClassification = trip.classification
+
+                val newClassification = if (direction == ItemTouchHelper.LEFT) "Work" else "Personal"
+                
+                // Optimistic update
+                val updatedTrip = trip.copy(classification = newClassification)
+                
+                // Update local lists
+                val newDisplayed = displayedTrips.toMutableList()
+                if (position in newDisplayed.indices) {
+                    newDisplayed[position] = updatedTrip
+                    displayedTrips = newDisplayed
+                }
+                
+                // Update adapter
+                adapter.updateItem(position, updatedTrip)
+
+                lifecycleScope.launch {
+                    repository.updateTripClassification(trip.startTimestamp, newClassification)
+                }
+
+                Snackbar.make(binding.root, "Classified as $newClassification", Snackbar.LENGTH_LONG)
+                    .setAction("Undo") {
+                        val retainedTrip = updatedTrip.copy(classification = originalClassification)
+                         // Update local lists reverted
+                        val revertedDisplayed = displayedTrips.toMutableList()
+                        if (position in revertedDisplayed.indices) {
+                            revertedDisplayed[position] = retainedTrip
+                            displayedTrips = revertedDisplayed
+                        }
+                        
+                        adapter.updateItem(position, retainedTrip)
+                        lifecycleScope.launch {
+                            repository.updateTripClassification(trip.startTimestamp, originalClassification)
+                        }
+                    }
+                    .show()
+            }
+            
+            override fun onChildDraw(c: Canvas, recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, dX: Float, dY: Float, actionState: Int, isCurrentlyActive: Boolean) {
+                super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+                val itemView = viewHolder.itemView
+                val background = ColorDrawable()
+                
+                if (dX > 0) { // Swipe Right -> Personal
+                    background.color = ContextCompat.getColor(this@HistoryActivity, R.color.primary)
+                    background.setBounds(itemView.left, itemView.top, itemView.left + dX.toInt(), itemView.bottom)
+                } else if (dX < 0) { // Swipe Left -> Work
+                    background.color = ContextCompat.getColor(this@HistoryActivity, R.color.secondary)
+                    background.setBounds(itemView.right + dX.toInt(), itemView.top, itemView.right, itemView.bottom)
+                } else {
+                    background.setBounds(0, 0, 0, 0)
+                }
+                background.draw(c)
+                // Optionally draw icon here
+            }
+        }
+        
+        ItemTouchHelper(swipeCallback).attachToRecyclerView(binding.historyRecyclerView)
+    }
+
+    private fun showDeleteConfirmation(trip: LocationRepository.Route) {
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Delete Trip?")
+            .setMessage("This action cannot be undone.")
+            .setPositiveButton("Delete") { _, _ ->
+                lifecycleScope.launch {
+                    repository.deleteTrip(trip.startTimestamp)
+                    loadHistory() // Reload to remove from list
+                    Toast.makeText(this@HistoryActivity, "Trip deleted", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
     
     private fun setupExportFab() {

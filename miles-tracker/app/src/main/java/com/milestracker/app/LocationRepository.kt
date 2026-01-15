@@ -26,6 +26,7 @@ class LocationRepository(context: Context) {
         private const val KEY_LOCAL_ROUTE_POINTS = "local_route_points"
         private const val KEY_UPDATE_COUNT = "update_count"
         private const val KEY_IS_TRACKING = "is_tracking"
+        private const val KEY_CURRENT_CLASSIFICATION = "current_classification"
         private const val TAG = "LocationRepository"
     }
 
@@ -41,6 +42,7 @@ class LocationRepository(context: Context) {
         val deviceId: String = "",
         val startTimestamp: Long = 0L,
         val points: List<LocationPoint> = emptyList(),
+        val classification: String = "Unclassified",
         val updatedAt: Long = 0L
     )
 
@@ -183,6 +185,14 @@ class LocationRepository(context: Context) {
         prefs.edit().putBoolean(KEY_IS_TRACKING, active).apply()
     }
 
+    fun setTripClassification(classification: String) {
+        prefs.edit().putString(KEY_CURRENT_CLASSIFICATION, classification).apply()
+    }
+
+    fun getTripClassification(): String {
+        return prefs.getString(KEY_CURRENT_CLASSIFICATION, "Unclassified") ?: "Unclassified"
+    }
+
     suspend fun exportData(): String? {
         return withContext(Dispatchers.IO) {
             try {
@@ -218,6 +228,7 @@ class LocationRepository(context: Context) {
                         deviceId = getDeviceId(),
                         startTimestamp = points.firstOrNull()?.timestamp ?: System.currentTimeMillis(),
                         points = points,
+                        classification = getTripClassification(),
                         updatedAt = System.currentTimeMillis()
                     )
                     
@@ -247,6 +258,30 @@ class LocationRepository(context: Context) {
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to get trip history", e)
                 emptyList()
+            }
+        }
+    }
+
+    suspend fun updateTripClassification(timestamp: Long, newClassification: String) {
+        withContext(Dispatchers.IO) {
+            try {
+                tripsCollection.document(timestamp.toString())
+                    .update("classification", newClassification)
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to update classification", e)
+            }
+        }
+    }
+
+    suspend fun deleteTrip(timestamp: Long) {
+        withContext(Dispatchers.IO) {
+            try {
+                tripsCollection.document(timestamp.toString())
+                    .delete()
+                    .await()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to delete trip", e)
             }
         }
     }
@@ -302,7 +337,7 @@ class LocationRepository(context: Context) {
                 row.append("\"$fromAddress\"").append(",") // From
                 row.append("\"$toAddress\"").append(",") // To
                 row.append(dateStr).append(",") // Date
-                row.append("").append(",") // Purpose (Food Services etc)
+                row.append(if (routeToExport != null) routeToExport.classification else getTripClassification()).append(",") // Purpose (Food Services etc)
                 row.append("").append(",") // Business Line
                 row.append(startTimeStr).append(",") // Time Started
                 row.append(endTimeStr).append(",") // Time Ended

@@ -16,6 +16,8 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import android.media.RingtoneManager
+import android.net.Uri
 import com.google.android.gms.location.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -84,6 +86,16 @@ class LocationTrackingService : Service() {
             setShowBadge(false)
         }
         notificationManager.createNotificationChannel(channel)
+
+        val finishChannel = NotificationChannel(
+            "trip_finished_channel",
+            "Trip Finished Updates",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+             description = "Notifications when a trip is classified or finished"
+             setShowBadge(true)
+        }
+        notificationManager.createNotificationChannel(finishChannel)
     }
     
     fun startManualTracking() {
@@ -112,6 +124,8 @@ class LocationTrackingService : Service() {
             isTrackingActive = false
             repository.setTrackingActive(false)
             updateNotification()
+            playStopRingtone()
+            showTripFinishedNotification()
         }
     }
     
@@ -206,6 +220,9 @@ class LocationTrackingService : Service() {
                 // Broadcast that we finished
                 val intent = Intent(ACTION_TRIP_FINISHED)
                 LocalBroadcastManager.getInstance(this@LocationTrackingService).sendBroadcast(intent)
+                
+                playStopRingtone()
+                showTripFinishedNotification()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -255,5 +272,35 @@ class LocationTrackingService : Service() {
         super.onDestroy()
         stopLocationUpdates()
         stopForeground(true)
+    }
+    private fun playStopRingtone() {
+        try {
+            val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val r = RingtoneManager.getRingtone(applicationContext, notification)
+            r.play()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun showTripFinishedNotification() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(this, "trip_finished_channel")
+            .setContentTitle("Trip Finished")
+            .setContentText("Trip saved. Tap to classify if needed.")
+            .setSmallIcon(android.R.drawable.ic_dialog_map)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        notificationManager.notify(NOTIFICATION_ID + 1, notification)
     }
 }

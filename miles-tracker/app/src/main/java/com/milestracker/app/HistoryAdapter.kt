@@ -8,9 +8,14 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+import androidx.core.content.ContextCompat
+import android.graphics.PorterDuff
+import android.content.res.ColorStateList
+
 class HistoryAdapter(
     private var trips: List<LocationRepository.Route>,
-    private val onExportClick: (LocationRepository.Route) -> Unit
+    private val onExportClick: (LocationRepository.Route) -> Unit,
+    private val onDeleteClick: (LocationRepository.Route) -> Unit
 ) : RecyclerView.Adapter<HistoryAdapter.ViewHolder>() {
 
     class ViewHolder(val binding: ItemTripHistoryBinding) : RecyclerView.ViewHolder(binding.root)
@@ -56,6 +61,31 @@ class HistoryAdapter(
         holder.binding.exportButton.setOnClickListener {
             onExportClick(trip)
         }
+        
+        holder.itemView.setOnLongClickListener {
+            onDeleteClick(trip)
+            true
+        }
+        
+        // Visual indicator for classification
+        // Visual indicator for classification
+        val context = holder.itemView.context
+        val (colorRes, bgRes, label) = when (trip.classification) {
+            "Personal" -> Triple(R.color.type_personal, R.color.type_personal_bg, "Personal")
+            "Work" -> Triple(R.color.type_work, R.color.type_work_bg, "Work")
+            else -> Triple(R.color.type_unclassified, R.color.type_unclassified_bg, "Unclassified")
+        }
+        
+        val color = ContextCompat.getColor(context, colorRes)
+        val bgColor = ContextCompat.getColor(context, bgRes)
+        
+        holder.binding.statusIndicator.setBackgroundColor(color)
+        holder.binding.classificationTag.text = label
+        holder.binding.classificationTag.setTextColor(color)
+        holder.binding.classificationTag.background.setTint(bgColor)
+        
+        // Ensure card background is consistent
+        holder.binding.cardView.setCardBackgroundColor(ContextCompat.getColor(context, R.color.card_background))
     }
 
     override fun getItemCount() = trips.size
@@ -63,6 +93,17 @@ class HistoryAdapter(
     fun updateData(newTrips: List<LocationRepository.Route>) {
         trips = newTrips
         notifyDataSetChanged()
+    }
+
+    fun updateItem(position: Int, trip: LocationRepository.Route) {
+        val mutableList = trips.toMutableList()
+        mutableList[position] = trip
+        trips = mutableList
+        notifyItemChanged(position)
+    }
+
+    fun getTripAt(position: Int): LocationRepository.Route {
+        return trips[position]
     }
     
     private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {

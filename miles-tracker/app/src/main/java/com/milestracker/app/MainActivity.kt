@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
+import android.media.RingtoneManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -67,17 +68,23 @@ class MainActivity : AppCompatActivity() {
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             intent?.let {
-                val lat = it.getDoubleExtra(LocationTrackingService.EXTRA_LATITUDE, 0.0)
-                val lng = it.getDoubleExtra(LocationTrackingService.EXTRA_LONGITUDE, 0.0)
-                val speed = it.getFloatExtra(LocationTrackingService.EXTRA_SPEED, 0f)
-                val updateCount = it.getIntExtra(LocationTrackingService.EXTRA_UPDATE_COUNT, 0)
-                
-                updateUI(lat, lng, speed, updateCount)
-                updateMapLocation(lat, lng)
-                if (locationService?.isTracking() == true) {
-                    updateRoute()
+                if (it.action == LocationTrackingService.ACTION_TRIP_FINISHED) {
+                    playStopRingtone()
+                    checkClassificationReminder()
+                    updateButtons()
+                } else {
+                    val lat = it.getDoubleExtra(LocationTrackingService.EXTRA_LATITUDE, 0.0)
+                    val lng = it.getDoubleExtra(LocationTrackingService.EXTRA_LONGITUDE, 0.0)
+                    val speed = it.getFloatExtra(LocationTrackingService.EXTRA_SPEED, 0f)
+                    val updateCount = it.getIntExtra(LocationTrackingService.EXTRA_UPDATE_COUNT, 0)
+                    
+                    updateUI(lat, lng, speed, updateCount)
+                    updateMapLocation(lat, lng)
+                    if (locationService?.isTracking() == true) {
+                        updateRoute()
+                    }
+                    updateButtons()
                 }
-                updateButtons()
             }
         }
     }
@@ -122,6 +129,7 @@ class MainActivity : AppCompatActivity() {
         setupButtons()
         loadSavedRoute()
         updateUIFromRepository()
+        updateClassificationButton()
         
         checkPermissionsAndStartService()
         checkBatteryOptimizations()
@@ -206,6 +214,62 @@ class MainActivity : AppCompatActivity() {
                 }
                 .setNegativeButton("Cancel", null)
                 .show()
+        }
+
+
+        binding.classificationButton.setOnClickListener {
+            cycleClassification()
+        }
+    }
+
+    private fun cycleClassification() {
+        val current = repository.getTripClassification()
+        val next = when (current) {
+            "Unclassified" -> "Personal"
+            "Personal" -> "Work"
+            "Work" -> "Unclassified"
+            else -> "Unclassified"
+        }
+        repository.setTripClassification(next)
+        updateClassificationButton()
+    }
+
+    private fun updateClassificationButton() {
+        val current = repository.getTripClassification()
+        binding.classificationButton.text = current
+        
+        // Update color/icon based on state if desired, for now just text is fine or simple tweaks
+        val (iconRes, colorRes) = when (current) {
+            "Personal" -> Pair(android.R.drawable.ic_menu_myplaces, R.color.primary)
+            "Work" -> Pair(android.R.drawable.ic_menu_agenda, R.color.secondary)
+            else -> Pair(android.R.drawable.ic_menu_sort_by_size, R.color.text_secondary) // Unclassified
+        }
+        
+        binding.classificationButton.setIconResource(iconRes)
+        // Note: For full color control we might need to set backgroundTintList, keeping it simple for now
+    }
+    
+    private fun playStopRingtone() {
+        try {
+            val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val r = RingtoneManager.getRingtone(applicationContext, notification)
+            r.play()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun checkClassificationReminder() {
+        val current = repository.getTripClassification()
+        if (current == "Unclassified") {
+            Toast.makeText(this, "⚠️ Please classify your trip!", Toast.LENGTH_LONG).show()
+             AlertDialog.Builder(this)
+                .setTitle("Trip Unclassified")
+                .setMessage("Please choose a classification for this trip.")
+                .setPositiveButton("OK", null)
+                .show()
+        } else {
+            Toast.makeText(this, "Trip finished: $current", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -367,7 +431,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         binding.mapView.onResume()
-        LocalBroadcastManager.getInstance(this).registerReceiver(locationReceiver, IntentFilter(LocationTrackingService.ACTION_LOCATION_UPDATE))
+        binding.mapView.onResume()
+        val filter = IntentFilter().apply {
+            addAction(LocationTrackingService.ACTION_LOCATION_UPDATE)
+            addAction(LocationTrackingService.ACTION_TRIP_FINISHED)
+        }
+        LocalBroadcastManager.getInstance(this).registerReceiver(locationReceiver, filter)
         updateButtons()
         updateRoute()
         updateUIFromRepository()
