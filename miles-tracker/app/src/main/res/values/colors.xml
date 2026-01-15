@@ -1,24 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="primary">#6200EE</color>
-    <color name="primary_dark">#3700B3</color>
-    <color name="primary_variant">#BB86FC</color>
-    <color name="secondary">#03DAC6</color>
-    <color name="secondary_variant">#018786</color>
+    <!-- Brand Colors -->
+    <color name="primary">#7C4DFF</color> <!-- Deep Purple -->
+    <color name="primary_dark">#3F1DCB</color>
+    <color name="primary_variant">#B47CFF</color>
+    <color name="secondary">#00E5FF</color> <!-- Cyan Accent -->
+    <color name="secondary_variant">#00B8D4</color>
+
+    <!-- Backgrounds & Surfaces -->
     <color name="background">#121212</color>
     <color name="surface">#1E1E1E</color>
-    <color name="surface_variant">#2D2D2D</color>
+    <color name="surface_variant">#2C2C2C</color>
+    <color name="card_background">#1E1E1E</color>
+    
+    <!-- Text -->
+    <color name="text_primary">#F5F5F5</color>
+    <color name="text_secondary">#B0B0B0</color>
+    <color name="text_tertiary">#757575</color>
+
+    <!-- Semantic / Status Colors -->
+    <color name="success">#00C853</color>
+    <color name="error">#CF6679</color>
+    <color name="warning">#FFAB40</color>
+    
+    <!-- Trip Classification -->
+    <color name="type_work">#448AFF</color> <!-- Blue -->
+    <color name="type_work_bg">#15202B</color>
+    <color name="type_personal">#00E676</color> <!-- Green -->
+    <color name="type_personal_bg">#10251B</color>
+    <color name="type_unclassified">#FF9100</color> <!-- Orange -->
+    <color name="type_unclassified_bg">#251C10</color>
+
+    <!-- Common -->
     <color name="on_primary">#FFFFFF</color>
     <color name="on_secondary">#000000</color>
     <color name="on_background">#FFFFFF</color>
     <color name="on_surface">#FFFFFF</color>
-    <color name="error">#CF6679</color>
-    <color name="success">#4CAF50</color>
-    <color name="warning">#FF9800</color>
-    <color name="route_line">#2196F3</color>
-    <color name="gradient_start">#6200EE</color>
-    <color name="gradient_end">#03DAC6</color>
-    <color name="card_background">#1F1F1F</color>
-    <color name="text_primary">#FFFFFF</color>
-    <color name="text_secondary">#B3B3B3</color>
+    <color name="divider">#2C2C2C</color>
+    
+    <!-- Gradients & Decor -->
+    <color name="route_line">#7C4DFF</color>
+    <color name="gradient_start">#7C4DFF</color>
+    <color name="gradient_end">#00E5FF</color>
 </resources>
