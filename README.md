@@ -1,5 +1,9 @@
 # Miles Tracker - Android App Walkthrough
 
+## Demo & UI Videos
+- [Miles Tracker Demo (4:23)](https://youtu.be/8h8569iK0bQ?si=IWB0q66rVkOVWPAC)
+- [Miles Tracker UI (Shorts)](https://youtube.com/shorts/EWRqVJu_fzM?si=5Fd5uBs31LE2J4OY)
+
 ## Project Created
 **Location**: [miles-tracker](file:///c:/Users/fahmi/Desktop/miles/miles-tracker)
 
